@@ -1,0 +1,58 @@
+Section: IOS configuration
+crypto ikev2 proposal Azure-Ikev2-Proposal
+ encryption aes-cbc-256
+ integrity sha1 sha256
+ group 2
+!
+crypto ikev2 policy Azure-Ikev2-Policy
+ match address local OUTSIDE_IP 
+ proposal Azure-Ikev2-Proposal
+!
+crypto ikev2 keyring to-onprem-keyring
+ peer REMOTE_GW_IP
+  address REMOTE_GW_IP
+  pre-shared-key PRE_SHARED_KEY
+!
+crypto ikev2 profile Azure-Ikev2-Profile
+ match address local OUTSIDE_IP 
+ match identity remote address REMOTE_GW_IP 255.255.255.255
+ authentication remote pre-share
+ authentication local pre-share
+ keyring local to-onprem-keyring
+ lifetime 28800
+ dpd 10 5 on-demand
+!
+crypto ipsec transform-set to-Azure-TransformSet esp-gcm 256
+ mode tunnel
+!
+crypto ipsec profile to-Azure-IPsecProfile
+ set transform-set to-Azure-TransformSet
+ set ikev2-profile Azure-Ikev2-Profile
+!
+interface Loopback11
+ ip address TUNNEL_BGP_LOCAL 255.255.255.255
+!
+interface Tunnel11
+ ip address TUNNEL_BGP_REMOTE 255.255.255.255
+ ip tcp adjust-mss 1350
+ tunnel source OUTSIDE_IP
+ tunnel mode ipsec ipv4
+ tunnel destination REMOTE_GW_IP
+ tunnel protection ipsec profile to-Azure-IPsecProfile
+!
+router bgp LOCAL_ASN
+ bgp router-id TUNNEL_BGP_LOCAL
+ bgp log-neighbor-changes
+ neighbor REMOTE_BGP_IP remote-as REMOTE_ASN
+ neighbor REMOTE_BGP_IP ebgp-multihop 255
+ neighbor REMOTE_BGP_IP update-source Loopback11
+ !
+ address-family ipv4
+  network INSIDE_CIDR mask NETMASK
+  neighbor REMOTE_BGP_IP activate
+ exit-address-family
+!
+!Static route to On-Prem-VNG BGP ip pointing to Tunnel11, so that it would be reachable
+ip route REMOTE_BGP_IP 255.255.255.255 Tunnel11
+!Static route for Subnet-1 pointing to CSR default gateway of internal subnet, this is added in order to be able to advertise this route using BGP
+ip route INSIDE_CIDR NETMASK INSIDE_GW
